@@ -1359,6 +1359,13 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		host->card = card;
 
 	mmc_free_ext_csd(ext_csd);
+/*Hynix eMMC:for restore the ios after resume the eMMC use CMD7, backup the ios when init_card*/
+#ifdef CONFIG_HUAWEI_KERNEL
+    if(EMMC_HYNIX_MID == host->card->cid.manfid)
+	{
+        mmc_backup_ios(host);
+	}
+#endif
 	return 0;
 
 free_card:
