@@ -13,7 +13,9 @@
 #include <linux/device.h>
 #include <linux/mmc/core.h>
 #include <linux/mod_devicetable.h>
-
+#ifdef CONFIG_HUAWEI_KERNEL
+#define EMMC_HYNIX_MID  0x90
+#endif
 struct mmc_cid {
 	unsigned int		manfid;
 	char			prod_name[8];

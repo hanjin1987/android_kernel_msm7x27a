@@ -1526,19 +1526,18 @@ static int mmc_resume(struct mmc_host *host)
 	BUG_ON(!host->card);
 
 	mmc_claim_host(host);
-	
-	/*Hynic mmc cannot wakeup using awake function, fix it temporarily*/
-#ifndef CONFIG_HUAWEI_KERNEL
-	
-	if (mmc_card_is_sleep(host->card)) {
-		mmc_restore_ios(host);
-		err = mmc_card_awake(host);
-	} else
-		err = mmc_init_card(host, host->ocr, host->card);
-#else
-	printk("call mmc_init_card instead of awake\n");
-	err = mmc_init_card(host, host->ocr, host->card);
-#endif
+#ifdef CONFIG_HUAWEI_KERNEL
+    /* Hynix eMMC not use CMD0 to swake the eMMC,use CMD7 to select the eMMC */
+    if(EMMC_HYNIX_MID == host->card->cid.manfid)
+    {
+        err =  mmc_card_sleepawake(host, 0);
+    }
+    else
+    {
+        err = mmc_init_card(host, host->ocr, host->card);
+    }
+#endif 
+
 	mmc_release_host(host);
 
 	return err;

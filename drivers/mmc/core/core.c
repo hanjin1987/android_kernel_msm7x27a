@@ -2606,6 +2606,17 @@ int mmc_resume_host(struct mmc_host *host)
 					    mmc_hostname(host), err);
 			err = 0;
 		}
+		/*Hynix eMMC:restore the ios when after CMD7 to select catd,
+		  *because before CMD to deslect the card the ios has changed to sleep mode*/
+#ifdef CONFIG_HUAWEI_KERNEL
+		else
+		{
+		    if(EMMC_HYNIX_MID == host->card->cid.manfid)
+            {
+                mmc_restore_ios(host);
+            }
+        }
+#endif
 	}
 	host->pm_flags &= ~MMC_PM_KEEP_POWER;
 	mmc_bus_put(host);

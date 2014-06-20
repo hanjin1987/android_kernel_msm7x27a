@@ -21,6 +21,9 @@
 #include "core.h"
 #include "mmc_ops.h"
 
+#ifdef CONFIG_HUAWEI_KERNEL
+#define EMMC_HYNIX_MID 0x90
+#endif
 static int _mmc_select_card(struct mmc_host *host, struct mmc_card *card)
 {
 	int err;
@@ -66,15 +69,30 @@ int mmc_card_sleepawake(struct mmc_host *host, int sleep)
 	if (sleep)
 		mmc_deselect_cards(host);
 
-	cmd.opcode = MMC_SLEEP_AWAKE;
-	cmd.arg = card->rca << 16;
-	if (sleep)
-		cmd.arg |= 1 << 15;
+#ifdef CONFIG_HUAWEI_KERNEL
+    /* Hynix eMMC not send CMD5 to avoid data partition read-only when sudden power off */
+    if(EMMC_HYNIX_MID != card->cid.manfid)
+    {
+#endif    
 
-	cmd.flags = MMC_RSP_R1B | MMC_CMD_AC;
-	err = mmc_wait_for_cmd(host, &cmd, 0);
-	if (err)
-		return err;
+    	cmd.opcode = MMC_SLEEP_AWAKE;
+    	cmd.arg = card->rca << 16;
+    	if (sleep)
+    		cmd.arg |= 1 << 15;
+
+    	cmd.flags = MMC_RSP_R1B | MMC_CMD_AC;
+    	err = mmc_wait_for_cmd(host, &cmd, 0);
+    	if (err)
+    		return err;
+#ifdef CONFIG_HUAWEI_KERNEL
+    }
+	else
+	{
+        printk("eMMC enter sleep mode without send CMD5!\r\n");
+	}
+#endif    
+    
+
 
 	/*
 	 * If the host does not wait while the card signals busy, then we will
