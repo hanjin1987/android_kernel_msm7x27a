@@ -80,7 +80,13 @@ DEVICE_ATTR(_pre##_##_name,_mode,_pre##_##_name##_show,_pre##_##_name##_store)
 #define SYN_I2C_RETRY_TIMES 10
 
 /* upgrade fw file path */
-#define TP_FW_COB_FILE_NAME  "/tp/1294018.img"
+#define TP_FW_COB_FILE_NAME  "/tp/1191601.img"
+/*Add cob FW for touch with independent button*/
+#define TP_BTN_FW_COB_FILE_NAME  "/tp/1469183_btn.img"
+int synap_button_map[MAX_BUTTON_NUM] = {0};
+int synap_button_num = 0;
+int button_flag = 0;
+
 #define TP_FW_FILE_NAME "/sdcard/update/synaptics.img"
 /*syn_version init */
 struct syn_version_config syn_version = 
@@ -242,6 +248,7 @@ u12 check_scope_X(u12 x)
 static int synaptics_rmi4_read_pdt(struct synaptics_rmi4 *ts)
 {
 	int ret = 0;
+	int retval = 0;
 	int nFd = 0;
 	int interruptCount = 0;
 	__u8 data_length = 0;
@@ -261,7 +268,7 @@ static int synaptics_rmi4_read_pdt(struct synaptics_rmi4 *ts)
     }
     else
     {
-        printk("set rmi page to zero successfull\n");
+		TS_DEBUG_RMI("set rmi page to zero successfull\n");
     }
 	fd_i2c_msg[0].addr = ts->client->addr;
 	fd_i2c_msg[0].flags = 0;
@@ -286,6 +293,7 @@ static int synaptics_rmi4_read_pdt(struct synaptics_rmi4 *ts)
 
 	ts->hasF11 = false;
 	ts->hasF19 = false;
+	ts->hasF1a = false;
 	ts->hasF30 = false;
 	ts->data_reg = 0xff;
 	ts->data_length = 0;
@@ -442,6 +450,62 @@ pdt_next_iter:
 		interruptCount += INTERRUPT_SOURCE_COUNT(fd.intSrc);
 	}
 
+	/*If button is enabled,Read f1a in reg page 2 */
+	if(TOUCH_INDEPENDENT_BUTTON == button_flag)
+	{
+		/*check if rmi page is 2*/
+		retval = i2c_smbus_write_byte_data(ts->client, 0xff, 0x02);
+		if(retval < 0)
+		{
+			printk("failed to set rmi page\n");
+			ret = retval;
+		}
+		else
+		{
+			TS_DEBUG_RMI("set rmi page to two successfull\n");
+		}
+		for (fd_reg = FD_ADDR_MAX; fd_reg >= FD_ADDR_MIN; fd_reg -= FD_BYTE_COUNT)	   
+		{
+			ret = i2c_transfer(ts->client->adapter, fd_i2c_msg, 2);
+			if (ret < 0) 
+			{
+				printk(KERN_ERR "I2C read failed querying RMI4 $%02X capabilities\n", ts->client->addr);
+				return ret;
+			}
+			if (!fd.functionNumber) 
+			{
+				/* End of PDT */
+				ret = nFd;
+				TS_DEBUG_RMI("Read %d functions from PDT\n", fd.functionNumber);
+				break;
+			}
+			++nFd;
+
+			switch (fd.functionNumber) 
+			{
+				case 0x1a:
+			
+				ts->hasF1a = true;
+				ts->f1a.data_offset = fd.dataBase;
+				break;
+				default:
+					break;
+			}
+		
+		}
+		/*check if rmi page is 0*/
+		retval = i2c_smbus_write_byte_data(ts->client, 0xff, 0x00);
+		if(retval < 0)
+		{
+			printk("failed to set rmi page\n");
+			ret = retval;
+		}
+		else
+		{
+			TS_DEBUG_RMI("set rmi page to zero successfull\n");
+		}
+	
+	}
 	/* Now that PDT has been read, interrupt count determined, F01 data length can be determined.*/
 	ts->f01.data_length = data_length = 1 + ((interruptCount + 7) / 8);
 	/* Change to end address for comparison
@@ -492,7 +556,8 @@ static void synaptics_rmi4_work_func(struct work_struct *work)
 {
 	int ret;
     __u8 finger_status = 0x00;
-    
+	/* Add new variable */
+	int i = 0;
     __u8 reg = 0;
     __u8 *finger_reg = NULL;
     u12 x = 0;
@@ -576,7 +641,6 @@ static void synaptics_rmi4_work_func(struct work_struct *work)
 					/*check the scope of X  axes*/
                     x = check_scope_X(x);
 
-                    DBG_MASK("the x is %d the y is %d the stauts is %d!\n",x,y,finger_status);
                 	/* Linux 2.6.31 multi-touch */
 					/* Modify the tp_report information to adapt the framework change */
 					prev_state = ts->f11_fingers[f].status;
@@ -591,6 +655,7 @@ static void synaptics_rmi4_work_func(struct work_struct *work)
 						/* nothing to report */
 						continue;
 					}
+					DBG_MASK("[TP]id:%2d x = %4d y = %4d p = %3d s = %2d\n",f,x,y,z,finger_status);
 
                     input_report_abs(ts->input_dev, ABS_MT_PRESSURE, z);
                 	input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, max(wx, wy));
@@ -644,19 +709,52 @@ static void synaptics_rmi4_work_func(struct work_struct *work)
 
         }
 
-		if (ts->hasF19 && interrupt[ts->f19.interrupt_offset] & ts->f19.interrupt_mask) 
+		/*Report button ,read reg F1A_0D_DATA00*/
+		if (ts->hasF1a)
         {
-			int reg;
-			int touch = 0;
-			for (reg = 0; reg < ((ts->f19.points_supported + 7) / 8); reg++)
+			static int last;
+			int toggled = 0;
+			uint8_t data = 0;
+			
+			/*check if rmi page is 2*/
+			ret = i2c_smbus_write_byte_data(ts->client, 0xff, 0x02);
+			if(ret < 0)
 			{
-				if (ts->data[ts->f19.data_offset + reg]) 
+				printk("failed to set rmi page\n");
+			}
+			else
                 {
-					touch = 1;
-				   	break;
+				TS_DEBUG_RMI("set rmi page to two successfull\n");
+				}
+			
+			data = i2c_smbus_read_byte_data(ts->client, ts->f1a.data_offset);
+			if (data < 0) {
+				printk(KERN_INFO "[TP] synaptics f01_data fail\n");
+			}
+			
+			toggled = data ^ last;
+			for (i = 0;i < synap_button_num;i++)
+			{
+				if (toggled & (1<<i))
+				{
+					input_report_key(ts->input_dev, synap_button_map[i], data & (1<<i));
+					DBG_MASK("%s:button key_code = %d key_value = %d\n",__func__,synap_button_map[i],!!(data & (1<<i)));
 				}
 			}
-			input_report_key(ts->input_dev, BTN_DEAD, touch);
+			
+			last = data;
+			
+			/*check if rmi page is 0*/
+			ret = i2c_smbus_write_byte_data(ts->client, 0xff, 0x00);
+			if(ret < 0)
+			{
+				printk("failed to set rmi page\n");
+			}
+			else
+			{
+				TS_DEBUG_RMI("set rmi page to zero successfull\n");
+			}
+			//input_report_key(ts->input_dev, BTN_DEAD, toggled);
 
 		}
     	input_sync(ts->input_dev);
@@ -1235,7 +1333,7 @@ static uint32_t syn_crc(uint16_t *data, uint16_t len)
 
 	if(NULL == data)
 	{
-		printk(KERN_INFO "syn_crc: data is null\n");
+		printk(KERN_INFO "%s: data is null\n",__func__);
 		return -1;
 	}
 	
@@ -1262,7 +1360,7 @@ static int crc_comparison(struct synaptics_rmi4 *ts, uint32_t config_crc)
 
 	if (NULL == ts)
 	{
-		printk(KERN_INFO "crc_comparison: ts is null\n");
+		printk(KERN_INFO "%s: ts is null\n",__func__);
 		goto err_handle_fail;
 	}
 
@@ -1284,7 +1382,7 @@ static int crc_comparison(struct synaptics_rmi4 *ts, uint32_t config_crc)
 
 	memcpy(&flash_crc, &data[12], 4);
 
-    printk("flash_crc = %X \n",flash_crc);
+	TS_DEBUG_RMI("flash_crc = %X \n",flash_crc);
 	if (flash_crc == config_crc)
 	{
 		ret = 0;
@@ -1309,7 +1407,7 @@ static int program_config(struct synaptics_rmi4 *ts, uint8_t *config)
 
     if (NULL == ts)
 	{
-		printk(KERN_INFO "program_config: ts is null\n");
+		printk(KERN_INFO "%s: ts is null\n",__func__);
 		goto err_handle_fail;
 	}
 	
@@ -1358,7 +1456,7 @@ static int syn_bootloader_is_lockdown(struct synaptics_rmi4 *ts)
 
     if(NULL == ts)
     {
-    	printk(KERN_INFO "syn_bootloader_is_lockdown: ts is null\n");
+		printk(KERN_INFO "%s: ts is null\n",__func__);
     	ret = -1;
     	return ret;
     }
@@ -1387,7 +1485,7 @@ static int syn_write_lockdown(struct synaptics_rmi4 *ts, uint8_t *config)
 
     if((NULL == ts) || (NULL == config))
     {
-    	printk(KERN_INFO "syn_write_lockdown: ts or config is null\n");
+		printk(KERN_INFO "%s: ts or config is null\n",__func__);
     	ret = -1;
     	return ret;
     }
@@ -1419,11 +1517,12 @@ static int syn_config_update(struct synaptics_rmi4 *ts, uint8_t *config)
 
  	
 	memcpy(&crc_checksum,&config[SYN_CONFIG_SIZE - 4], 4);
-	printk(KERN_INFO "[TP] CRC = %X\n" , syn_crc((uint16_t *)config, SYN_CONFIG_SIZE / 2 - 2));
+	ret = syn_crc((uint16_t *)config, SYN_CONFIG_SIZE / 2 - 2);
+	TS_DEBUG_RMI(KERN_INFO "[TP] CRC = %X\n", ret);
 
 	ret = RMI4_enable_program(ts->client);
 	if (ret < 0) {
-		printk(KERN_INFO "[TP] syn_config_update: Enable flash programming fail!\n");
+		printk(KERN_INFO "[TP] %s: Enable flash programming fail!\n",__func__);
 		return RMI4_disable_program(ts->client);
 	}
      
@@ -1432,7 +1531,7 @@ static int syn_config_update(struct synaptics_rmi4 *ts, uint8_t *config)
 		//compare the checksum, if same or different 
 		ret = crc_comparison(ts, crc_checksum);
 		if (ret < 0) {
-			printk(KERN_INFO "[TP] syn_config_update: CRC comparison fail!\n");
+			printk(KERN_INFO "[TP] %s: CRC comparison fail!\n",__func__);
 			RMI4_disable_program(ts->client);
 			return -1;
 		} else if (ret == 0)
@@ -1445,7 +1544,7 @@ static int syn_config_update(struct synaptics_rmi4 *ts, uint8_t *config)
 	for (retry = 0; retry < 3; retry++) {
 		ret = program_config(ts, config);
 		if (ret < 0) {
-			printk(KERN_INFO "[TP] syn_config_update: Program config fail %d!\n", retry + 1);
+			printk(KERN_INFO "[TP] %s: Program config fail %d!\n",__func__,retry + 1);
 			//continue;
 		}
 		else
@@ -1454,11 +1553,11 @@ static int syn_config_update(struct synaptics_rmi4 *ts, uint8_t *config)
     ret = RMI4_disable_program(ts->client);
     if (ret < 0)
 	{
-        printk(KERN_INFO "[TP] syn_config_update: Disable flash programming fail %d\n", retry + 1);
+		printk(KERN_INFO "[TP] %s: Disable flash programming fail %d\n",__func__,retry + 1);
 		return ret;
 	}
 	if (retry == 3) {
-		printk(KERN_INFO "[TP] syn_config_update: Program config fail 3 times\n");
+		printk(KERN_INFO "[TP] %s: Program config fail 3 times\n",__func__);
 		return ret;
 	}
 	return 0;
@@ -1498,7 +1597,7 @@ static int synaptics_cob_upgrade(struct i2c_client *client)
 
     if (NULL == client)
     {
-    	printk(KERN_INFO "synaptics_cob_upgrade: client is null\n");
+		printk(KERN_INFO "%s: client is null\n",__func__);
 		goto err_handle_fail;
     }
 
@@ -1511,7 +1610,15 @@ static int synaptics_cob_upgrade(struct i2c_client *client)
 	for (i = 0 ; i < 2; i++) 
 	{
 		/* manual upgrade */
+		/*check whether v_key or button*/
+		if(TOUCH_INDEPENDENT_BUTTON == button_flag)
+		{
+			ret= i2c_update_firmware(client,TP_BTN_FW_COB_FILE_NAME);
+		}
+		else
+		{
 		ret= i2c_update_firmware(client,TP_FW_COB_FILE_NAME);  
+		}
 		if (0 == ret)
 		{
 			break;
@@ -1557,10 +1664,12 @@ err_handle_fail:
 }
 
 /*COB handle*/
+/*check config ,v_key or button*/
 static int synaptics_cob_handle(struct i2c_client *client)
 {
     int ret = 0;
     int i = 0;
+    int pr_ver = 0;
 	uint8_t data = 0;
 	int module_id = 0;
 	uint8_t *p_config = NULL;
@@ -1612,10 +1721,10 @@ static int synaptics_cob_handle(struct i2c_client *client)
 	}
      
     get_ic_name();
-    printk(KERN_INFO "[TP] IC_NAME = %d\n",syn_version.syn_ic_name);
+	TS_DEBUG_RMI(KERN_INFO "[TP] IC_NAME = %d\n",syn_version.syn_ic_name);
     	
 	module_id = get_tp_id();
-	printk("gpio_value is %d \n",module_id);
+	printk("%s:Touch gpio ID = %d \n",__func__,module_id);
     if(module_id < 0)
     {
         printk(KERN_INFO "Get tp gpio value [%d] fail! \n",module_id);
@@ -1637,7 +1746,17 @@ static int synaptics_cob_handle(struct i2c_client *client)
 	/*Default need upgrade fw*/
 	if (NEED_UPDATE_FW == is_need_update_fw())
 	{
-	    if(CURRENT_PR_VERSION != syn_version.syn_firmware_version)
+		if (TOUCH_INDEPENDENT_BUTTON == button_flag)
+		{
+			pr_ver = CURRENT_PR_VERSION_BTN;
+			TS_DEBUG_RMI("%s: pr_ver = %d \n", __func__,pr_ver);
+		}
+		else
+		{
+			pr_ver = CURRENT_PR_VERSION;
+			TS_DEBUG_RMI("%s: pr_ver = %d \n", __func__,pr_ver);
+		}
+	    if(pr_ver != syn_version.syn_firmware_version)
 	    {
 		    ret = synaptics_cob_upgrade(client);
 			if(ret < 0)
@@ -1649,7 +1768,7 @@ static int synaptics_cob_handle(struct i2c_client *client)
 	}
 
 	/* update module config, enable touchscreen was operator */
-	if((NULL != p_config) && (CURRENT_PR_VERSION == syn_version.syn_firmware_version))
+	if((NULL != p_config) && (pr_ver == syn_version.syn_firmware_version))
 	{
 		ret = syn_config_update(g_ts, p_config);
 		if (ret < 0) 
@@ -1659,11 +1778,11 @@ static int synaptics_cob_handle(struct i2c_client *client)
 		} 
 		else if (ret == 0)
 		{
-			printk(KERN_INFO "[TP] syn_config_update success\n");
+			TS_DEBUG_RMI(KERN_INFO "[TP] syn_config_update success\n");
 		}				
 		else
 		{
-			printk(KERN_INFO "[TP] Warning: syn_config_update: the same "
+			TS_DEBUG_RMI(KERN_INFO "[TP] Warning: syn_config_update: the same "
 			"config version and CRC but touch controller always stay in bootloader mode\n");
 		}
 		if (syn_get_version() < 0)
@@ -1679,7 +1798,7 @@ static int synaptics_cob_handle(struct i2c_client *client)
 	}
 
 	/*write lockdow date */
-    if(CURRENT_PR_VERSION == syn_version.syn_firmware_version)
+    if(pr_ver == syn_version.syn_firmware_version)
     {
         ret = RMI4_enable_program(client);
 		if (ret < 0) 
@@ -1691,7 +1810,7 @@ static int synaptics_cob_handle(struct i2c_client *client)
 		ret = syn_bootloader_is_lockdown(g_ts);
 		if (ret > 0)
 		{
-			printk(KERN_INFO "Device already locked.\n");
+			TS_DEBUG_RMI(KERN_INFO "Device already locked.\n");
 		}
 		else if (ret == 0)
 		{
@@ -1749,6 +1868,7 @@ static int synaptics_rmi4_probe(
     /*when the probe is come in we first detect the probe for touch is ready?*/
     struct touch_hw_platform_data *touch_pdata = NULL;
     struct tp_resolution_conversion tp_type_self_check = {0};
+	struct tp_button_map tp_button_map = {0};
     
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) 
     {
@@ -1779,6 +1899,35 @@ static int synaptics_rmi4_probe(
         	printk(KERN_ERR "%s: it's the first touch driver! \n", __func__);
     	}
     }
+
+	/*Add for touch with independent button*/
+	if(touch_pdata->read_button_flag)
+	{
+		button_flag = touch_pdata->read_button_flag();
+		TS_DEBUG_RMI("%s: the touch button flag is %d! \n", __func__, button_flag);
+	}
+
+	if(TOUCH_INDEPENDENT_BUTTON == button_flag)
+	{
+		if(touch_pdata->get_touch_button_map)
+		{
+			ret = touch_pdata->get_touch_button_map(&tp_button_map);
+			if(ret)
+			{
+				synap_button_num = tp_button_map.button_num;
+				for( i=0;i<synap_button_num;i++)
+				{
+					synap_button_map[i] = tp_button_map.button_map[i];
+				}
+				TS_DEBUG_RMI("%s: the touch has %d buttons! \n", __func__,synap_button_num);
+			}
+			else
+			{
+				TS_DEBUG_RMI("%s: the touch has no button! \n", __func__);
+			}
+		}
+	}
+	
     if(touch_pdata->touch_power)
     {
         ret = touch_pdata->touch_power(1);
@@ -1799,21 +1948,29 @@ static int synaptics_rmi4_probe(
 			goto err_power_on_failed;
 		}
 	}
-    if(touch_pdata->get_touch_resolution)
-    {
-        ret = touch_pdata->get_touch_resolution(&tp_type_self_check);
-        if(ret < 0)
-        {
-            printk(KERN_ERR "%s: reset failed \n", __func__);
-            goto err_power_on_failed;
-        }
-        else
-        {
-            lcd_x = tp_type_self_check.lcd_x;
-            lcd_y = tp_type_self_check.lcd_y;
-            lcd_all = tp_type_self_check.lcd_all;
-        }
-    }
+	if(touch_pdata->get_touch_resolution)
+	{
+		ret = touch_pdata->get_touch_resolution(&tp_type_self_check);
+		if(ret < 0)
+		{
+			printk(KERN_ERR "%s: get touch resolution failed \n", __func__);
+			goto err_power_on_failed;
+		}
+		else
+		{
+			lcd_x = tp_type_self_check.lcd_x;
+			lcd_y = tp_type_self_check.lcd_y;
+			if(TOUCH_VIRTUAL_KEY == button_flag)
+			{
+				lcd_all = tp_type_self_check.lcd_all;
+			}
+			else
+			{
+				/*if don't use virtualkey, the sensor area is the same as LCD*/
+				lcd_all = tp_type_self_check.lcd_y;
+			}
+		}
+	}
 	g_ts = kzalloc(sizeof(*g_ts), GFP_KERNEL);
 	if (g_ts == NULL) 
     {
@@ -1918,11 +2075,7 @@ static int synaptics_rmi4_probe(
 		d_entry->read_proc = tp_read_proc;
 		d_entry->data = NULL;
 	}
-    
-    {
-        TS_DEBUG_RMI("the ReportingMode is changged ok!\n");
-    }
-    
+	
 	g_ts->input_dev = input_allocate_device();
 	if (!g_ts->input_dev)
     {
@@ -1942,19 +2095,16 @@ static int synaptics_rmi4_probe(
 	set_bit(ABS_Y, g_ts->input_dev->absbit);
     set_bit(KEY_NUMLOCK, g_ts->input_dev->keybit);
 	set_bit(INPUT_PROP_DIRECT,g_ts->input_dev->propbit);
-/*we removed it to here to register the touchscreen first */
-	ret = input_register_device(g_ts->input_dev);
-	if (ret) 
-    {
-		printk(KERN_ERR "synaptics_rmi4_probe: Unable to register %s \
-				input device\n", g_ts->input_dev->name);
-		ret = -ENODEV;
-		goto err_input_register_device_failed;
-	} 
-    else 
+	if (g_ts->hasF1a) 
 	{
-		TS_DEBUG_RMI("synaptics input device registered\n");
+/*delete one line*/
+		/*init the input key value*/
+		for( i=0;i<synap_button_num;i++)
+		{
+			input_set_capability(g_ts->input_dev, EV_KEY,synap_button_map[i]);
+		}
 	}
+/*Move registering input device behind config input_dev parameters*/
 	
 	/*All products support five points ,delete */	
 	if (g_ts->hasF11) 
@@ -2010,6 +2160,18 @@ static int synaptics_rmi4_probe(
 		{
 			set_bit(BTN_F30 + i, g_ts->input_dev->keybit);
 		}
+	}
+	ret = input_register_device(g_ts->input_dev);
+	if (ret)
+	{
+		printk(KERN_ERR "synaptics_rmi4_probe: Unable to register %s \
+				input device\n", g_ts->input_dev->name);
+		ret = -ENODEV;
+		goto err_input_register_device_failed;
+	}
+	else
+	{
+		TS_DEBUG_RMI("synaptics input device registered\n");
 	}
 
 	if (client->irq) 
@@ -2074,7 +2236,7 @@ static int synaptics_rmi4_probe(
     ret = i2c_smbus_write_byte_data(client, fd_01.controlBase, 0x00);
     if(ret < 0)
     {
-        printk(KERN_ERR "synaptics_rmi_probe: the touch can't normal operation in sleep mode \n");
+		printk(KERN_ERR "%s: the touch can't normal operation in sleep mode \n",__func__);
     }
 	return 0;
 err_input_register_device_failed:
@@ -2142,6 +2304,7 @@ static int synaptics_rmi4_suspend(struct i2c_client *client, pm_message_t mesg)
     }
 
 	ts->enable = 0;
+	DBG_MASK(KERN_ERR "synaptics_rmi4_touch is suspend!\n");
 
 	return 0;
 }
@@ -2164,7 +2327,7 @@ static int synaptics_rmi4_resume(struct i2c_client *client)
 	}
 	else
 		hrtimer_start(&ts->timer, ktime_set(1, 0), HRTIMER_MODE_REL);
-    printk(KERN_ERR "synaptics_rmi4_touch is resume!\n");
+	DBG_MASK(KERN_ERR "synaptics_rmi4_touch is resume!\n");
 
 	return 0;
 }
@@ -2193,7 +2356,7 @@ int RMI4_disable_program(struct i2c_client *client)
 	unsigned char cdata; 
 	unsigned int loop_count=0;
   
-	printk("RMI4 disable program...\n");
+	TS_DEBUG_RMI("RMI4 disable program...\n");
 	// Issue a reset command
 	i2c_smbus_write_byte_data(client,fd_01.commandBase,0x01);
 
@@ -2214,7 +2377,7 @@ static int RMI4_enable_program(struct i2c_client *client)
 {
 	unsigned short bootloader_id = 0 ;
 	int ret = -1;
-	printk("RMI4 enable program...\n");
+	TS_DEBUG_RMI("RMI4 enable program...\n");
 	 // Read and write bootload ID
 	bootloader_id = i2c_smbus_read_word_data(client,fd_34.queryBase);
 	i2c_smbus_write_word_data(client,fd_34.dataBase+2,bootloader_id);//write Block Data 0

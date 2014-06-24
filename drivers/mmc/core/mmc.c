@@ -1359,7 +1359,6 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		host->card = card;
 
 	mmc_free_ext_csd(ext_csd);
-
 	return 0;
 
 free_card:

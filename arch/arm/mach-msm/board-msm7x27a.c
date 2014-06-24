@@ -68,8 +68,13 @@
 #ifdef CONFIG_HUAWEI_KERNEL
 #include <linux/hardware_self_adapt.h>
 /*added for virtualkeys*/
+#ifdef CONFIG_INPUT_HW_ATE
+char buf_virtualkey[500];
+ssize_t  buf_vkey_size=0;
+#else
 static char buf_virtualkey[500];
 static ssize_t  buf_vkey_size=0;
+#endif
 #endif
 
 #ifdef CONFIG_HUAWEI_KERNEL
@@ -257,6 +262,7 @@ static struct msm_i2c_platform_data msm_gsbi1_qup_i2c_pdata = {
 #define MSM7x25A_MSM_PMEM_ADSP_SIZE      0xB91000
 #define CAMERA_ZSL_SIZE		(SZ_1M * 60)
 
+#define MSM_3M_PMEM_ADSP_SIZE	(0x1048000)
 /*   enlarge the pmem space for HDR on 8950s
  */
 static unsigned int get_pmem_adsp_size(void)
@@ -265,8 +271,14 @@ static unsigned int get_pmem_adsp_size(void)
 	|| machine_is_msm8x25_U8950D()
 	/*delete some line; to reduce pmem for releasing memory*/
 	||machine_is_msm8x25_U8950()){
-			return MSM_PMEM_ADSP_BIG_SIZE;		
+			return CAMERA_ZSL_SIZE;		
 		}
+	else if (machine_is_msm7x27a_H867G()
+           || machine_is_msm7x27a_H868C()
+	   || machine_is_msm8x25_Y301_A1() )
+	{
+		return  MSM_3M_PMEM_ADSP_SIZE;
+	}	
 	else
 		return MSM_PMEM_ADSP_SIZE;
 
@@ -870,13 +882,15 @@ static void fix_sizes(void)
 		pmem_mdp_size = MSM7x25A_MSM_PMEM_MDP_SIZE;
 		pmem_adsp_size = MSM7x25A_MSM_PMEM_ADSP_SIZE;
 	} else {
-		pmem_mdp_size = MSM_PMEM_MDP_SIZE;
+		pmem_mdp_size = get_mdp_pmem_size();
+		printk("pmem_mdp_size=%08x\n",pmem_mdp_size);
 		pmem_adsp_size = get_pmem_adsp_size();
 		printk("pmem_adsp_size=%08x\n",pmem_adsp_size);
 	}
-
+/*delete qcom code */
+/*
 	if (get_ddr_size() > SZ_512M)
-		pmem_adsp_size = CAMERA_ZSL_SIZE;
+		pmem_adsp_size = CAMERA_ZSL_SIZE;*/
 #ifdef CONFIG_ION_MSM
 	msm_ion_camera_size = pmem_adsp_size;
 	msm_ion_audio_size = (MSM_PMEM_AUDIO_SIZE + PMEM_KERNEL_EBI1_SIZE);
@@ -1270,15 +1284,22 @@ static void __init virtualkeys_init(void)
     struct kobject *properties_kobj;
     int ret=0;
     /*Modify the virtualkeys of touchsreen*/
-    if(machine_is_msm7x27a_U8815()
-        || machine_is_msm8x25_U8825()
+    if(machine_is_msm7x27a_U8815())
+    {
+    	buf_vkey_size = sprintf(buf_virtualkey,
+        			__stringify(EV_KEY) ":" __stringify(KEY_MENU)  ":57:850:100:80"
+        		   ":" __stringify(EV_KEY) ":" __stringify(KEY_HOME)   ":240:850:100:80"
+        		   ":" __stringify(EV_KEY) ":" __stringify(KEY_BACK) ":423:850:100:80"
+        		   "\n"); 
+    }
+    else if(machine_is_msm8x25_U8825()
         || machine_is_msm8x25_U8825D()
         || machine_is_msm8x25_C8825D()
         || machine_is_msm8x25_C8833D()
         || machine_is_msm8x25_U8833D()
         || machine_is_msm8x25_U8833()
-		|| machine_is_msm7x27a_C8820()
-        || machine_is_msm8x25_H881C()
+        || machine_is_msm8x25_Y300_J1()
+        || machine_is_msm7x27a_C8820()
         || machine_is_msm8x25_C8812P())
     {
     	buf_vkey_size = sprintf(buf_virtualkey,
@@ -1287,15 +1308,24 @@ static void __init virtualkeys_init(void)
         		   ":" __stringify(EV_KEY) ":" __stringify(KEY_MENU) ":423:850:100:80"
         		   "\n"); 
     }
-
+    else if(machine_is_msm8x25_H881C()
+        || machine_is_msm8x25_Y301_A1())
+    {
+        buf_vkey_size = sprintf(buf_virtualkey,
+        			__stringify(EV_KEY) ":" __stringify(KEY_BACK)  ":80:850:110:80"
+        		   ":" __stringify(EV_KEY) ":" __stringify(KEY_HOME)   ":240:850:110:80"
+        		   ":" __stringify(EV_KEY) ":" __stringify(KEY_MENU) ":400:850:110:80"
+        		   "\n"); 
+    }
     else if(machine_is_msm8x25_C8950D()
         || machine_is_msm8x25_U8950D()
         || machine_is_msm8x25_U8950())
     {
+        /* extend the height of virtual key area (from 80 to 120 pixels)*/
         buf_vkey_size = sprintf(buf_virtualkey,
-        			__stringify(EV_KEY) ":" __stringify(KEY_BACK)  ":80:1035:160:80"
-        		   ":" __stringify(EV_KEY) ":" __stringify(KEY_HOME)   ":270:1035:160:80"
-        		   ":" __stringify(EV_KEY) ":" __stringify(KEY_MENU) ":460:1035:160:80"
+        			__stringify(EV_KEY) ":" __stringify(KEY_BACK) ":80:1035:160:120"
+        		   ":" __stringify(EV_KEY) ":" __stringify(KEY_HOME) ":270:1035:160:120"
+        		   ":" __stringify(EV_KEY) ":" __stringify(KEY_MENU) ":460:1035:160:120"
         		   "\n"); 
     }
     /*New add FWVGA virtual keys */
@@ -1317,9 +1347,9 @@ static void __init virtualkeys_init(void)
 	    /* 3 key configuration for 3.5" TP */
     /*calibrate virtualkey for H867G and H868C*/
         buf_vkey_size = sprintf(buf_virtualkey,
-                  __stringify(EV_KEY) ":" __stringify(KEY_BACK)  ":50:510:80:50"
-                  ":" __stringify(EV_KEY) ":" __stringify(KEY_HOME)   ":160:510:80:50"
-                  ":" __stringify(EV_KEY) ":" __stringify(KEY_MENU) ":270:510:80:50"
+                  __stringify(EV_KEY) ":" __stringify(KEY_BACK)  ":50:515:80:60"
+                  ":" __stringify(EV_KEY) ":" __stringify(KEY_HOME)   ":160:515:80:60"
+                  ":" __stringify(EV_KEY) ":" __stringify(KEY_MENU) ":270:515:80:60"
                   "\n");
     }
     else if (machine_is_msm7x27a_U8655_EMMC())
@@ -1780,6 +1810,26 @@ MACHINE_START(MSM8X25_C8813, "MSM8x25 C8813 BOARD")
 	.handle_irq	= gic_handle_irq,
 MACHINE_END
 MACHINE_START(MSM8X25_H881C, "MSM8x25 H881C BOARD")
+	.atag_offset    = PHYS_OFFSET + 0x100,
+	.map_io         = msm8625_map_io,
+	.reserve        = msm8625_reserve,
+	.init_irq       = msm8625_init_irq,
+	.init_machine   = msm7x2x_init,
+	.timer          = &msm_timer,
+	.init_early     = msm7x2x_init_early,
+	.handle_irq	= gic_handle_irq,
+MACHINE_END
+MACHINE_START(MSM8X25_Y301_A1, "MSM8x25 Y301_A1 BOARD")
+	.atag_offset    = PHYS_OFFSET + 0x100,
+	.map_io         = msm8625_map_io,
+	.reserve        = msm8625_reserve,
+	.init_irq       = msm8625_init_irq,
+	.init_machine   = msm7x2x_init,
+	.timer          = &msm_timer,
+	.init_early     = msm7x2x_init_early,
+	.handle_irq	= gic_handle_irq,
+MACHINE_END
+MACHINE_START(MSM8X25_Y300_J1, "MSM8x25 Y300_J1 BOARD")
 	.atag_offset    = PHYS_OFFSET + 0x100,
 	.map_io         = msm8625_map_io,
 	.reserve        = msm8625_reserve,

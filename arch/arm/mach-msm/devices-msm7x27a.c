@@ -882,14 +882,6 @@ static struct resource kgsl_3d0_resources[] = {
 static struct kgsl_device_platform_data kgsl_3d0_pdata = {
 	.pwrlevel = {
 		{
-			.gpu_freq = 380000000,
-                        .bus_freq = 245760000,
-		},
-		{
-			.gpu_freq = 355760000,
-                        .bus_freq = 213760000,
-		},
-		{
 			.gpu_freq = 245760000,
 			.bus_freq = 200000000,
 		},
@@ -903,7 +895,7 @@ static struct kgsl_device_platform_data kgsl_3d0_pdata = {
 		},
 	},
 	.init_level = 0,
-	.num_levels = 5,
+	.num_levels = 3,
 	.set_grp_async = set_grp_xbar_async,
 	.idle_timeout = HZ,
 	.strtstp_sleepwake = true,
@@ -1335,12 +1327,22 @@ static struct resource msm8625_resources_sdc3[] = {
 		.end	= MSM8625_INT_SDC3_1,
 		.flags	= IORESOURCE_IRQ,
 	},
-	{
-		.name	= "sdcc_dma_chnl",
-		.start	= DMOV_NAND_CHAN,
-		.end	= DMOV_NAND_CHAN,
-		.flags	= IORESOURCE_DMA,
-	},
+    /*change DMA channel to 8*/
+#ifdef CONFIG_HUAWEI_KERNEL
+    {
+        .name   = "sdcc_dma_chnl",
+        .start  = DMOV_SDC3_CHAN,
+        .end    = DMOV_SDC3_CHAN,
+        .flags  = IORESOURCE_DMA,
+    },
+#else
+    {
+        .name   = "sdcc_dma_chnl",
+        .start  = DMOV_NAND_CHAN,
+        .end    = DMOV_NAND_CHAN,
+        .flags  = IORESOURCE_DMA,
+    },
+#endif
 	{
 		.name	= "sdcc_dma_crci",
 		.start	= DMOV_SDC3_CRCI,
@@ -1701,7 +1703,6 @@ static int __init msm8625_cpu_id(void)
 	case 0x771:
 	case 0x77C:
 	case 0x780:
-	case 0x785: /* Edge-only MSM8125-0 */
 	case 0x8D0:
 		cpu = MSM8625;
 		break;
@@ -1936,14 +1937,18 @@ static void __init msm_cpr_init(void)
 		msm_cpr_mode_data[TURBO_MODE].turbo_Vmin = 1100000;
 	}
 
-	pr_debug("%s: cpr: ring_osc: 0x%x\n", __func__,
+	pr_info("%s: cpr: ring_osc: 0x%x\n", __func__,
 		msm_cpr_mode_data[TURBO_MODE].ring_osc);
 	pr_info("%s: cpr: turbo_quot: 0x%x\n", __func__, cpr_info->turbo_quot);
 	pr_info("%s: cpr: pvs_fuse: 0x%x\n", __func__, cpr_info->pvs_fuse);
 	pr_info("%s: cpr: floor_fuse: 0x%x\n", __func__, cpr_info->floor_fuse);
-	pr_debug("%s: cpr: nom_Vmin: %d, turbo_Vmin: %d\n", __func__,
+	pr_info("%s: cpr: nom_Vmin: %d, turbo_Vmin: %d\n", __func__,
 		msm_cpr_mode_data[TURBO_MODE].nom_Vmin,
 		msm_cpr_mode_data[TURBO_MODE].turbo_Vmin);
+	pr_info("%s: cpr: nom_Vmax: %d, turbo_Vmax: %d\n", __func__,
+		msm_cpr_mode_data[TURBO_MODE].nom_Vmax,
+		msm_cpr_mode_data[TURBO_MODE].turbo_Vmax);
+
 	kfree(cpr_info);
 
 	if (msm8625_cpu_id() == MSM8625A)

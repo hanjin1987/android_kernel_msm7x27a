@@ -105,6 +105,7 @@ struct melfas_ts_data {
 	struct hrtimer timer;	
 	int (*power)(struct i2c_client* client, int on);
 	struct early_suspend early_suspend;
+	int finger_status[MELFAS_MAX_TOUCH];
 	
     bool is_first_point;
     bool use_touch_key;
@@ -737,6 +738,7 @@ static void clear_pressed_point_status(struct melfas_ts_data *ts)
 	{
 		for (i = 0; i < MELFAS_MAX_TOUCH; i++)
 		{
+            input_report_abs(ts->input_dev, ABS_MT_TRACKING_ID,  i);
             input_report_abs(ts->input_dev, ABS_MT_POSITION_X,  0);
             input_report_abs(ts->input_dev, ABS_MT_POSITION_Y,  0);
             input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
@@ -812,10 +814,9 @@ static void melfas_ts_work_func(struct work_struct *work)
 	uint8_t touchAction = 0, touchType = 0, fingerID = 0;
 	int k = 0;
 	u8 finger_pressed_count = 0;
-
-	TS_DEBUG_MELFAS(KERN_ERR "melfas_ts_work_func\n");
+	int prev_state = 0;
 	if (ts == NULL)
-		MELFAS_DEBUG(KERN_ERR "melfas_ts_work_func : TS NULL\n"); 
+		printk(KERN_ERR "%s: TS pointer is NULL\n",__func__); 
 
 	/*   Simple send transaction:  
 	 * S Addr Wr [A]  Data [A] Data [A] ... [A] Data [A] P   
@@ -831,7 +832,7 @@ static void melfas_ts_work_func(struct work_struct *work)
         {
             ret = i2c_master_recv(ts->client, buf, 1);
 
-			MELFAS_DEBUG(KERN_ERR "melfas_ts_work_func : i2c_master_recv [%d]:%d\n", ret,buf[0]);
+			MELFAS_DEBUG(KERN_ERR "%s: i2c_master_recv [%d]:%d\n", __func__, ret,buf[0]);
 
             if (ret == 1)
             {
@@ -844,7 +845,7 @@ static void melfas_ts_work_func(struct work_struct *work)
     }
     if(ret < 0 ) // ret < 0
     {
-		MELFAS_DEBUG(KERN_ERR "melfas_ts_work_func: i2c failed\n");     
+		printk(KERN_ERR "%s: i2c failed\n", __func__);     
 		enable_irq(ts->client->irq);
 		return ; 
     }
@@ -853,7 +854,7 @@ static void melfas_ts_work_func(struct work_struct *work)
     {
 		buf[0] = TS_READ_START_ADDR;
 		ret = i2c_master_send(ts->client, buf, 1);
-		MELFAS_DEBUG(KERN_ERR "melfas_ts_work_func : i2c_master_send [%d]\n", ret);
+		MELFAS_DEBUG(KERN_ERR "%s: i2c_master_send [%d]\n", __func__, ret);
 
 		if (ret >= 0)
 		{ 	
@@ -867,7 +868,7 @@ static void melfas_ts_work_func(struct work_struct *work)
 		
     if(ret < 0) 
     {
-        printk(KERN_ERR "melfas_ts_work_func: i2c failed\n");
+        printk(KERN_ERR "%s: i2c failed\n", __func__);
 		if (ts->use_irq)
 		{
         	enable_irq(ts->client->irq);
@@ -904,15 +905,25 @@ static void melfas_ts_work_func(struct work_struct *work)
 				g_Mtouch_info[fingerID-1].strength = buf[i + 5];  
 								
 
-				MELFAS_DEBUG(KERN_ERR "melfas_ts_work_func: Touch ID: %d, x: %d, y: %d, z: %d w: %d\n", 
-						i, g_Mtouch_info[fingerID-1].fingerX, g_Mtouch_info[fingerID-1].fingerY, g_Mtouch_info[fingerID-1].strength, g_Mtouch_info[fingerID-1].width);          
+				MELFAS_DEBUG(KERN_ERR "%s: Touch ID: %d, x: %d, y: %d, z: %d w: %d\n", 
+						__func__, i, g_Mtouch_info[fingerID-1].fingerX, g_Mtouch_info[fingerID-1].fingerY, g_Mtouch_info[fingerID-1].strength, g_Mtouch_info[fingerID-1].width);          
 			}
 		}   
 	} 
 	if (ts->support_multi_touch)
 	{
-		for (i = 0; i < fingerID; i++)
+		for (i = 0; i < MELFAS_MAX_TOUCH; i++)
 		{
+			prev_state = ts->finger_status[i];
+			if (prev_state && (!g_Mtouch_info[i].action))  //previous state is down and current state is up means a release event
+		{
+				g_Mtouch_info[i].strength = g_Mtouch_info[i].fingerX = g_Mtouch_info[i].fingerY = 0;
+			}
+			else if ((!prev_state) && (!g_Mtouch_info[i].action))  //consecutive release event will not be handled
+			{
+				continue;
+			}
+            input_report_abs(ts->input_dev, ABS_MT_TRACKING_ID,  i);
             input_report_abs(ts->input_dev, ABS_MT_POSITION_X,  g_Mtouch_info[i].fingerX);
             input_report_abs(ts->input_dev, ABS_MT_POSITION_Y,  g_Mtouch_info[i].fingerY);
             input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, g_Mtouch_info[i].strength);
@@ -920,7 +931,8 @@ static void melfas_ts_work_func(struct work_struct *work)
 			input_report_abs(ts->input_dev, ABS_MT_PRESSURE, g_Mtouch_info[i].strength);
 			input_mt_sync(ts->input_dev);	
 
-			if (g_Mtouch_info[i].strength)
+			ts->finger_status[i] = g_Mtouch_info[i].action;
+			if (g_Mtouch_info[i].action)
 				finger_pressed_count++;
         }
 		input_report_key(ts->input_dev, BTN_TOUCH, finger_pressed_count);
@@ -942,14 +954,14 @@ static void melfas_ts_work_func(struct work_struct *work)
 	if (ts->use_irq)
 	{
 	    enable_irq(ts->client->irq);
-	    MELFAS_DEBUG("melfas_ts_work_func,enable_irq\n");
+	    MELFAS_DEBUG("%s:,enable_irq\n",__func__);
 	}
 }
 
 static enum hrtimer_restart melfas_ts_timer_func(struct hrtimer *timer)
 {
 	struct melfas_ts_data *ts = container_of(timer, struct melfas_ts_data, timer);
-	MELFAS_DEBUG("melfas_ts_timer_func\n");
+	MELFAS_DEBUG("%s\n",__func__);
 	queue_work(ts->melfas_wq, &ts->work);
 	hrtimer_start(&ts->timer, ktime_set(0, 12500000), HRTIMER_MODE_REL);
 	return HRTIMER_NORESTART;
@@ -964,7 +976,7 @@ static irqreturn_t melfas_ts_irq_handler(int irq, void *dev_id)
 		return IRQ_HANDLED;
 	}
 	disable_irq_nosync(ts->client->irq);
- 	MELFAS_DEBUG("melfas_ts_irq_handler: disable irq\n");
+ 	MELFAS_DEBUG("%s: disable irq\n",__func__);
 	queue_work(ts->melfas_wq, &ts->work);
 	return IRQ_HANDLED;
 }
@@ -978,11 +990,11 @@ static int melfas_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	struct touch_hw_platform_data *touch_pdata = NULL;
 	struct tp_resolution_conversion tp_type_self_check;
 	
-	TS_DEBUG_MELFAS(" In melfas_ts_probe: \n");
+	TS_DEBUG_MELFAS(" In %s: \n",__func__);
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) 
 	{
-		pr_err(KERN_ERR "melfas_ts_probe: need I2C_FUNC_I2C\n");
+		pr_err(KERN_ERR "%s: need I2C_FUNC_I2C\n",__func__);
 		ret = -ENODEV;
 		goto err_check_functionality_failed;
 	}
@@ -1032,7 +1044,7 @@ static int melfas_ts_probe(struct i2c_client *client, const struct i2c_device_id
         ret = touch_pdata->get_touch_resolution(&tp_type_self_check);
         if(ret < 0)
         {
-            printk(KERN_ERR "%s: reset failed \n", __func__);
+            printk(KERN_ERR "%s: get touch resolution failed \n", __func__);
             goto err_power_failed;
         }
         else
@@ -1045,7 +1057,11 @@ static int melfas_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	/*delete some lines*/
 
 
-	melfas_ts_power(client,1);
+	ret = melfas_ts_power(client,1);
+	if (ret < 0)
+	{
+		pr_err("%s: power on failed\n",__func__);
+	}
 	msleep(200);  /* wait for device reset; */
 	
 	for(i = 0; i < 3; i++) 
@@ -1060,8 +1076,11 @@ static int melfas_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	if (i == 3) 
 	{	
 		pr_err("%s:check %d times, but dont find melfas_ts device\n",__FUNCTION__, i);
-		melfas_ts_power(client,0);
-
+		ret = melfas_ts_power(client,0);
+		if (ret < 0)
+		{
+			pr_err("%s: power on failed\n",__func__);
+		}
 		goto err_find_touchpanel_failed;
 	}
 
@@ -1105,15 +1124,14 @@ static int melfas_ts_probe(struct i2c_client *client, const struct i2c_device_id
 		goto err_destroy_wq;
 	}
 	INIT_WORK(&ts->work, melfas_ts_work_func);
-		
-    ts->is_first_point = true;
+
     ts->support_multi_touch = client->flags;
 	/*delete some lines*/
 
 	ts->input_dev = input_allocate_device();
 	if (ts->input_dev == NULL) {
 		ret = -ENOMEM;
-		pr_err("melfas_ts_probe: Failed to allocate touch input device\n");
+		pr_err("%s: Failed to allocate touch input device\n",__func__);
 		goto err_input_dev_alloc_failed;
 	}
 	ts->input_dev->name = "melfas-touchscreen";
@@ -1132,6 +1150,7 @@ static int melfas_ts_probe(struct i2c_client *client, const struct i2c_device_id
 
     if(ts->support_multi_touch)
     {
+        input_set_abs_params(ts->input_dev, ABS_MT_TRACKING_ID, 0, MELFAS_MAX_TOUCH-1, 0, 0);
     	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_X, 0, lcd_x, 0, 0);
     	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_Y, 0, lcd_y, 0, 0);
     	input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
@@ -1149,7 +1168,7 @@ static int melfas_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	ret = input_register_device(ts->input_dev);
 	if (ret) 
 	{
-		pr_err("melfas_ts_probe: Unable to register %s input device\n", ts->input_dev->name);
+		pr_err("%s: Unable to register %s input device\n",__func__, ts->input_dev->name);
 		goto err_input_register_device_failed;
 	}
 	else 
@@ -1209,7 +1228,7 @@ static int melfas_ts_probe(struct i2c_client *client, const struct i2c_device_id
 #endif
 
 	/*move before*/
-	printk(KERN_INFO "melfas_ts_probe: Start touchscreen %s in %s mode\n", ts->input_dev->name, ts->use_irq ? "interrupt" : "polling");
+	printk(KERN_INFO "%s: Start touchscreen %s in %s mode\n",__func__, ts->input_dev->name, ts->use_irq ? "interrupt" : "polling");
 #ifdef CONFIG_HUAWEI_HW_DEV_DCT
 	/* detect current device successful, set the flag as present */
 	set_hw_dev_flag(DEV_I2C_TOUCH_PANEL);
@@ -1233,6 +1252,7 @@ err_destroy_wq:
 	kfree(ts);
 err_alloc_data_failed:
 err_find_touchpanel_failed:
+	gpio_free(reset_pin);
 err_power_failed:
     if(touch_pdata->touch_power)
 	{
@@ -1245,34 +1265,46 @@ err_check_functionality_failed:
 
 static int melfas_ts_power(struct i2c_client *client, int on)
 {
-    int ret = 0;
-    TS_DEBUG_MELFAS("melfas_ts_power on = %d\n", on);
-
-    ret = gpio_tlmm_config(GPIO_CFG(reset_pin, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
-    if(ret < 0)
-    {
-        pr_err("%s: fail to config reset_pin(#%d)\n", __func__,reset_pin);
-    }
+	int ret = 0;
+	static bool gpio_requested = false;
+	TS_DEBUG_MELFAS("%s on = %d\n",__func__, on);
+	if(!gpio_requested)
+	{
+		ret = gpio_request(reset_pin,"melfas_reset");
+		if(ret)
+		{
+			pr_err("%s: fail to request reset_pin(#%d)\n", __func__,reset_pin);
+			return ret;
+		}
+		ret = gpio_tlmm_config(GPIO_CFG(reset_pin, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
+		if(ret < 0)
+		{
+			pr_err("%s: fail to config reset_pin(#%d)\n", __func__,reset_pin);
+			gpio_free(reset_pin);
+			return ret;
+		}
+		gpio_requested = true;
+	}
 
 	/*the CE PIN is reverse*/
-    if (on) 
-    {			  
-    	ret = gpio_direction_output(reset_pin, 0);
-    	if (ret) 
-    	{
-    		pr_err("%s: Failed to configure power on = (%d)\n",__func__, ret);
-    	} 
-    }
-    else 
-    {
-    	ret = gpio_direction_output(reset_pin, 1);
-    	if (ret) 
-    	{
-    		pr_err("%s: Failed to configure power off = (%d)\n",__func__, ret);
-    	}       	
-    }	
+	if (on)
+	{
+		ret = gpio_direction_output(reset_pin, 0);
+		if (ret)
+		{
+			pr_err("%s: Failed to configure power on = (%d)\n",__func__, ret);
+		}
+	}
+	else
+	{
+		ret = gpio_direction_output(reset_pin, 1);
+		if (ret)
+		{
+			pr_err("%s: Failed to configure power off = (%d)\n",__func__, ret);
+		}
+	}
 
-	return ret;	
+	return ret;
 }
 
 static int melfas_ts_remove(struct i2c_client *client)
@@ -1292,7 +1324,7 @@ static int melfas_ts_suspend(struct i2c_client *client, pm_message_t mesg)
 {
 	int ret;
 	struct melfas_ts_data *ts = i2c_get_clientdata(client);
-	MELFAS_DEBUG("In melfas_ts_suspend\n");
+	MELFAS_DEBUG("In %s\n",__func__);
 	
 	if (ts->use_irq)
 		disable_irq(client->irq);
@@ -1307,7 +1339,7 @@ static int melfas_ts_suspend(struct i2c_client *client, pm_message_t mesg)
 	ret = melfas_ts_power(client,0);
 	if (ret < 0)
 	{
-		pr_err("melfas_ts_suspend: power off failed\n");
+		pr_err("%s: power off failed\n",__func__);
 	}
 	
 	return 0;
@@ -1317,7 +1349,7 @@ static int melfas_ts_resume(struct i2c_client *client)
 {
 	int ret,i;
 	struct melfas_ts_data *ts = i2c_get_clientdata(client);
-	MELFAS_DEBUG("In melfas_ts_resume\n");
+	MELFAS_DEBUG("In %s\n",__func__);
 
     /*clear the unreleased touch status to solve the TP disfunction*/
     for (i = 0; i < MELFAS_MAX_TOUCH; i++)
@@ -1333,7 +1365,7 @@ static int melfas_ts_resume(struct i2c_client *client)
 	ret = melfas_ts_power(client,1);	
 	if (ret < 0) 
 	{
-	    pr_err("melfas_ts_resume: power on failed\n");			
+	    pr_err("%s: power on failed\n",__func__);			
 	}
 
 	msleep(200);  /* wait for device reset; */
@@ -1353,7 +1385,7 @@ static void melfas_ts_early_suspend(struct early_suspend *h)
 {
 	struct melfas_ts_data *ts;
 
-	MELFAS_DEBUG("melfas_ts_early_suspend\n");
+	MELFAS_DEBUG("%s\n",__func__);
 	ts = container_of(h, struct melfas_ts_data, early_suspend);
 	melfas_ts_suspend(ts->client, PMSG_SUSPEND);  
 }
@@ -1362,7 +1394,7 @@ static void melfas_ts_late_resume(struct early_suspend *h)
 {
 	struct melfas_ts_data *ts;
 
-	MELFAS_DEBUG("melfas_ts_late_resume\n");
+	MELFAS_DEBUG("%s\n",__func__);
 	ts = container_of(h, struct melfas_ts_data, early_suspend);
 	melfas_ts_resume(ts->client);	
 }
@@ -1388,7 +1420,7 @@ static struct i2c_driver melfas_ts_driver = {
 
 static int __devinit melfas_ts_init(void)
 {
-	TS_DEBUG_MELFAS(KERN_ERR "melfas_ts_init\n ");
+	TS_DEBUG_MELFAS(KERN_ERR "%s\n ",__func__);
 	return i2c_add_driver(&melfas_ts_driver);
 }
 

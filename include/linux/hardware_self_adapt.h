@@ -192,7 +192,8 @@ typedef enum
     HW_VER_SUB_SURF          = 0xF,
     HW_VER_SUB_MAX           = 0xF
 }hw_ver_sub_type;
-
+#define GS_SUSPEND  0
+#define GS_RESUME   1
 /*add new g-sensor*/
 typedef enum
 {
@@ -320,16 +321,19 @@ typedef enum
     SPK_SUB_MIC = 0x20000,
     DTS_ENABLE = 0x100000,
     DTS_DISABLE = 0x0,
+    SMICMMI_ENABLE = 0x1000000,
+    SMICMMI_DISABLE = 0x0,
     
     AUDIO_TYPE_MAX = 0xffffffff
 }audio_property_type;
-
 audio_property_type get_audio_dts_enable(void);
 audio_property_type get_audio_spkmic_type(void);
 audio_property_type get_audio_speaker_type(void);
 audio_property_type get_audio_fm_type(void);
 audio_property_type get_audio_fir_enabled(void);
 audio_property_type get_audio_mic_type(void);
+
+audio_property_type get_audio_mmi_submic_test_enable(void);
 void get_audio_property(char *audio_property);
 
 
@@ -392,6 +396,7 @@ int board_support_ofn(bool * ofn_support);
 char *get_compass_gs_position_name(void);
 char *get_sensors_list_name(void);
 char *get_wifi_device_name(void);
+char *get_framebuffer_boosted(void);
 hw_bt_device_model get_hw_bt_device_model(void);
 char *get_bt_device_name(void);
 lcd_panel_type get_lcd_panel_type(void);
@@ -399,6 +404,10 @@ hw_lcd_ctrl_bl_type get_hw_lcd_ctrl_bl_type(void);
 lcd_type get_hw_lcd_resolution_type(void);
 /*Add 4 framebuffer and delete the mem adapter strategy*/	
 unsigned int get_framebuffer_size(void);
+
+unsigned int get_mdp_pmem_size(void);
+uint get_vibrator_voltage(void);
+
 lcd_align_type get_lcd_align_type(void);
 char *get_lcd_panel_name(void);
 int board_surport_fingers(bool * is_surport_fingers);
@@ -477,5 +486,6 @@ typedef enum
 }hw_battery_id_mv;
 hw_battery_id_mv get_battery_resistance_id(void);
 char* get_battery_manufacturer_info(void);
+bool check_product_y300_for_camera(void);
 #endif
 

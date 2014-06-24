@@ -39,15 +39,14 @@ static struct msm_camera_i2c_reg_conf hi542_prev_settings[] = {
 	// Preview Setting
 	///////////////////////////////////////////
 	{0x0010, 0x41},
-	{0x0011, 0x07}, //jk 0x00},
-	
+	{0x0011, 0x00}, //jk 0x00},
 	{0x0034, 0x03},
 	{0x0035, 0xD4},
 	
 	//{0x0042,0x00},
 	//{0x0043,0x14},
 	
-	{0x0500, 0x19},// 1B}, LSC OFF
+	{0x0500, 0x1b},// 1B}, LSC ON
 	
 	{0x0630, 0x05},
 	{0x0631, 0x18},//08},
@@ -58,12 +57,12 @@ static struct msm_camera_i2c_reg_conf hi542_prev_settings[] = {
 
 static struct msm_camera_i2c_reg_conf hi542_snap_settings[] = {
 	{0x0010, 0x40},
-	{0x0011, 0x07}, //00}, exposure method change
+	{0x0011, 0x00}, //00}, exposure method change
 
 	{0x0034, 0x07},
 	{0x0035, 0xA8},
 
-	{0x0500, 0x11}, //13}, LSC OFF
+	{0x0500, 0x13}, //13}, LSC ON
 
 	{0x0630, 0x0A},
 	{0x0631, 0x30},
@@ -72,7 +71,7 @@ static struct msm_camera_i2c_reg_conf hi542_snap_settings[] = {
 };
 
 static struct msm_camera_i2c_reg_conf hi542_recommend_settings[] = {			
-	{0x0011,0x97},  //90},//exposure method change
+	{0x0011,0x90},  //90},//exposure method change
 	{0x0020,0x00},  /*man_spec_edof_ctrl_edof_fw_spare_0 Gain x7*/
 	{0x0021,0x00},  /*man_spec_edof_ctrl_edof_fw_spare_0 Gain x7*/
 	{0x0022,0x00},  /*man_spec_edof_ctrl_edof_fw_spare_0 Gain x7*/
@@ -490,7 +489,7 @@ static struct msm_camera_i2c_reg_conf hi542_recommend_settings[] = {
 	{0x074B,0xB1},/*man_spec_edof_ctrl_edof_fw_spare_0 Gain x7*/
 
 	
-	{0x0500,0x19},//1b LSC disable
+	{0x0500,0x1b},//1b LSC enable
 	{0x0510,0x10},/*man_spec_edof_ctrl_edof_fw_spare_0 Gain x7*/
 	
 	
@@ -536,6 +535,17 @@ static struct msm_camera_i2c_reg_conf hi542_recommend_settings[] = {
 	{0x0631,0x18},// jk 08/*man_spec_edof_ctrl_edof_fw_spare_0 Gain x7*/
 	{0x0632,0x03},/*man_spec_edof_ctrl_edof_fw_spare_0 Gain x7*/
 	{0x0633,0xd4},//jk c8},/*man_spec_edof_ctrl_edof_fw_spare_0 Gain x7*/
+	//LSC
+	{0x0540, 0x10}, /* man_spec_edof_ctrl_edof_fw_spare_0 Gain x7 */
+	{0x0541, 0x1f}, /* man_spec_edof_ctrl_edof_fw_spare_0 Gain x7 */
+	{0x0550, 0x80}, /* man_spec_edof_ctrl_edof_fw_spare_0 Gain x7 */
+	{0x0551, 0x80}, /* man_spec_edof_ctrl_edof_fw_spare_0 Gain x7 */
+	{0x0552, 0x80}, /* man_spec_edof_ctrl_edof_fw_spare_0 Gain x7 */
+	{0x0553, 0x80}, /* man_spec_edof_ctrl_edof_fw_spare_0 Gain x7 */
+	{0x0554, 0x52}, /* man_spec_edof_ctrl_edof_fw_spare_0 Gain x7 */
+	{0x0555, 0x52}, /* man_spec_edof_ctrl_edof_fw_spare_0 Gain x7 */
+	{0x0556, 0x52}, /* man_spec_edof_ctrl_edof_fw_spare_0 Gain x7 */
+	{0x0571, 0x60}, //60}, /* man_spec_edof_ctrl_edof_fw_spare_0 Gain x7 */
 	{0x0663,0x05},//0a}, trail time/*man_spec_edof_ctrl_edof_fw_spare_0 Gain x7*/
 	{0x0660,0x03},/*man_spec_edof_ctrl_edof_fw_spare_0 Gain x7*/
 
@@ -675,9 +685,175 @@ static struct msm_camera_i2c_client hi542_sensor_i2c_client = {
     .addr_pos = 0,
     .addr_dir = 0,
 };
+int32_t hi542_sensor_write_exp_gain1(struct msm_sensor_ctrl_t *s_ctrl,
+		uint16_t gain, uint32_t line)
+{ 
+#if 1
+	uint16_t max_legal_gain = 0x00;//0x0200;
+	int32_t rc = 0;
+	uint32_t min_line = 4;
+	uint32_t pixels_line = 0;
+	uint32_t fixed_line = 0; 
+	uint8_t i = 0, mask = 0xFF;
+	uint8_t values_1[] = { 0, 0, 0, 0, 0 }; 
+	uint8_t values_2[] = { 0, 0, 0, 0, 0 }; 
+		
+		/*HI542's Max gain x8 = 0x00h, if gain < 0x00h then gain = 0x00h*/
+	if (gain < max_legal_gain){
+		CDBG("Max legal gain line:%d\n",__LINE__);
+		gain = max_legal_gain;
+	} 
+		/* HI542's min line = 4*/ 
+	if (line < min_line){
+		CDBG("Max legal gain line:%d\n",__LINE__);
+		line= min_line;
+	} 
+		
+		pixels_line = line * 2791; //s_ctrl->curr_line_length_pclk ; //2791;
+		fixed_line = pixels_line + 5582; //(s_ctrl->curr_line_length_pclk * 2);//5582 = 2791 * 2
+	
+		
+	for ( i = 1 ; i < 5; i++ ) {
+		values_1[i] = ( mask & pixels_line ); 
+		values_2[i] = ( mask & fixed_line); 
+	  	pixels_line >>= 8;
+		fixed_line >>= 8;	}
+		
+		values_1[0] = gain;
+	
+	pr_info("hi542_write_prev_exp_gain :%d%d\n",gain,line);
+	//offset=s_ctrl->hi542_exp_gain_info->vert_offset;
+
+	/*HI542 fixed time update*/
+	
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		0x0120, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+11),
+		values_2[4],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		0x0121, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+12),
+		values_2[3],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		0x0122, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+13),
+		values_2[2],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		0x0123, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+14),
+		values_2[1],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	
+	
+	/*HI542 max time update*/
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		0x011c, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+7),
+		values_1[4],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		0x011d, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+8),
+		values_1[3],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		0x011e, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+9),
+		values_1[2],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		0x011f, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+10),
+		values_1[1],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	
+	/*HI542 Analog gain update*/
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+             0x0129, //s_ctrl->sensor_exp_gain_info->global_gain_addr,
+             values_1[0],
+             MSM_CAMERA_I2C_BYTE_DATA);
+
+      /*HI542 Exposure time update*/
+      msm_camera_i2c_write(s_ctrl -> sensor_i2c_client,
+             0x0115, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr),
+             values_1[4],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+            0x0116, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+1),
+            values_1[3],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+            0x0117, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+2),
+            values_1[2],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+            0x0118, //(s_ctrl->sensor_exp_gain_info->coarse_int_time_addr+3),
+            values_1[1],
+		MSM_CAMERA_I2C_BYTE_DATA);	
+	
+
+#else
+	uint16_t max_legal_gain = 0x00;//0x0200;
+	int32_t rc = 0;
+//	static uint32_t fl_lines, offset;
+	uint32_t min_line = 4;
+	uint32_t pixels_line = 0;
+	uint8_t i = 0, mask = 0xFF;	uint8_t values[] = { 0, 0, 0, 0, 0};
 
 
+	/* HI542's Max gain x8 = 0x00h, if gain < 0x00h then gain = 0x00h*/
+	if (gain < max_legal_gain){
+		CDBG("Max legal gain line:%d\n",__LINE__);
+		gain = max_legal_gain;
+	} 
+	/* HI542's min line = 4*/
+	if (line < min_line){
+		CDBG("Max legal gain line:%d\n",__LINE__);
+		line= min_line;
+	} 
+	
+	pixels_line = line*2791;//2791 = above struct hi542_dimensions[] .line_length_pclk
 
+	for ( i = 1 ; i < 5; i++ ) {
+	   values[i]  = ( mask & pixels_line );	   pixels_line >>= 8;	}
+	values[0] = gain;
+
+	pr_info("hi542_write_prev_exp_gain :%d%d\n",gain,line);
+//	offset = s_ctrl->hi542_exp_gain_info->vert_offset;
+
+
+	/*HI542 Analog gain update*/
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		s_ctrl->sensor_exp_gain_info->global_gain_addr,
+		values[0],
+		MSM_CAMERA_I2C_BYTE_DATA);
+
+	/*HI542 Exposure time update*/
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		s_ctrl->sensor_exp_gain_info->coarse_int_time_addr,
+		values[4],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		s_ctrl->sensor_exp_gain_info->coarse_int_time_addr + 1,
+		values[3],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		s_ctrl->sensor_exp_gain_info->coarse_int_time_addr + 2,
+		values[2],
+		MSM_CAMERA_I2C_BYTE_DATA);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+		s_ctrl->sensor_exp_gain_info->coarse_int_time_addr + 3,
+		values[1],
+		MSM_CAMERA_I2C_BYTE_DATA);	
+	
+
+#endif
+
+	if(is_first_preview_frame)
+	{
+		msleep(70);
+		is_first_preview_frame = 0;
+	}
+
+return rc;
+}
 int32_t hi542_sensor_match_id(struct msm_sensor_ctrl_t * s_ctrl)
 {
 	int32_t rc = 0;
@@ -727,8 +903,8 @@ static struct msm_sensor_fn_t hi542_func_tbl = {
 	.sensor_group_hold_on = msm_sensor_group_hold_on,
 	.sensor_group_hold_off = msm_sensor_group_hold_off,
 	.sensor_set_fps = msm_sensor_set_fps,
-	.sensor_write_exp_gain = msm_sensor_write_exp_gain1,
-	.sensor_write_snapshot_exp_gain = msm_sensor_write_exp_gain1,
+	.sensor_write_exp_gain = hi542_sensor_write_exp_gain1,
+	.sensor_write_snapshot_exp_gain = hi542_sensor_write_exp_gain1,
 	.sensor_setting = msm_sensor_setting,
 	.sensor_set_sensor_mode = msm_sensor_set_sensor_mode,
 	.sensor_mode_init = msm_sensor_mode_init,

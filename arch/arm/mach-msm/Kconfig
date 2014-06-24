@@ -1036,7 +1036,13 @@ config MACH_MSM8X25_C8833D
 	bool "MSM8X25_C8833D SURF"
 	help
 	  Support for the HUAWEI 8x25 C8833D board.
-    
+config MACH_MSM8X25_Y300_J1
+	depends on ARCH_MSM8625
+	depends on !MSM_STACKED_MEMORY
+	default n
+	bool "MSM8X25_Y300_J1 SURF"
+	help
+	  Support for the HUAWEI 8x25 Y300_J1 board.
 config MACH_MSM8X25_C8813
 	depends on ARCH_MSM8625
 	depends on !MSM_STACKED_MEMORY
@@ -1052,6 +1058,13 @@ config MACH_MSM8X25_H881C
 	bool "MSM8X25_H881C SURF"
 	help
 	  Support for the HUAWEI 8x25 H881C board.
+config MACH_MSM8X25_Y301_A1
+	depends on ARCH_MSM8625
+	depends on !MSM_STACKED_MEMORY
+	default n
+	bool "MSM8X25_Y301_A1 SURF"
+	help
+	  Support for the HUAWEI 8x25 Y301_A1 board.
 
 endmenu
 
@@ -2778,3 +2791,12 @@ config HUAWEI_BT_WCN2243
 	default n
 	help
 	  Select Y to use Qualcomm's BlueZ stack. Used by WCN2243. Not used in Huawei devices.
+
+config FRAMEBUF_SELF_ADAPT_HACK
+	bool "Huawei framebuffer memory hack"
+	depends on FRAMEBUF_SELF_ADAPT
+	default n
+	help
+	  Select Y to add an extra 2^20 to the framebuffer memory region determined by Huawei's
+	  bootloader if the space is too small for the framebuffer. This is useful for booting on
+	  the Gingerbread bootloader.

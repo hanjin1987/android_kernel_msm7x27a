@@ -426,36 +426,40 @@ err_power_fail:
 /* use gpio free to release */
 static int set_touch_interrupt_gpio(void)
 {
-    int gpio_config = 0;
-    int ret = 0;
+	int gpio_config = 0;
+	int ret = 0;
+
+	ret = gpio_request(MSM_7X27A_TOUCH_INT_PIN, "TOUCH_INT");
+	if (ret)
+	{
+		pr_err("%s:touch int gpio %d request failed\n", __func__, MSM_7X27A_TOUCH_INT_PIN);
+		return ret;
+	}
 
 	gpio_config = GPIO_CFG(MSM_7X27A_TOUCH_INT_PIN,0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP,GPIO_CFG_2MA);
 	ret = gpio_tlmm_config(gpio_config, GPIO_CFG_ENABLE);
 	if (ret)
 	{
-		pr_err("%s:touch int gpio config failed\n", __func__);
+		pr_err("%s:touch int gpio %d config failed\n", __func__, MSM_7X27A_TOUCH_INT_PIN);
+		gpio_free(MSM_7X27A_TOUCH_INT_PIN);
 		return ret;
 	}
-	ret = gpio_request(MSM_7X27A_TOUCH_INT_PIN, "TOUCH_INT");
-	if (ret)
-	{
-		pr_err("%s:touch int gpio request failed\n", __func__);
-		return ret;
-	}
+	
 	ret = gpio_direction_input(MSM_7X27A_TOUCH_INT_PIN);
 	if (ret)
 	{
-		pr_err("%s:touch int gpio input failed\n", __func__);
+		pr_err("%s:touch int gpio %d input failed\n", __func__, MSM_7X27A_TOUCH_INT_PIN);
+		gpio_free(MSM_7X27A_TOUCH_INT_PIN);
 		return ret;
 	}
 
-    gpio_free(MSM_7X27A_TOUCH_INT_PIN);
+	gpio_free(MSM_7X27A_TOUCH_INT_PIN);
 	return ret;
 }
 /*we use this to detect the probe is detected*/
 static void set_touch_probe_flag(int detected)
 {
-	if(detected >= 0)
+	if(detected > 0)
 	{
 		atomic_set(&touch_detected_yet, 1);
 	}
@@ -478,27 +482,48 @@ static int read_touch_probe_flag(void)
 static int touch_reset(void)
 {
 	int ret = 0;
-    int gpio_config = 0;	
+	int gpio_config = 0;
+
+	ret = gpio_request(MSM_7x27A_TOUCH_RESET_PIN, "TOUCH_RESET");
+	if (ret)
+	{
+		pr_err("%s:touch reset gpio %d request failed\n", __func__, MSM_7x27A_TOUCH_RESET_PIN);
+		return ret;
+	}
+
 	gpio_config = GPIO_CFG(MSM_7x27A_TOUCH_RESET_PIN,0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP,GPIO_CFG_2MA);
 	ret = gpio_tlmm_config(gpio_config, GPIO_CFG_ENABLE);
 	if (ret)
 	{
-		pr_err("%s:touch int gpio config failed\n", __func__);
-		return ret;
-	}
-	ret = gpio_request(MSM_7x27A_TOUCH_RESET_PIN, "TOUCH_RESET");
-	if (ret)
-	{
-		pr_err("%s:touch int gpio request failed\n", __func__);
+		pr_err("%s:touch reset gpio %d config failed\n", __func__, MSM_7x27A_TOUCH_RESET_PIN);
+		gpio_free(MSM_7x27A_TOUCH_RESET_PIN);
 		return ret;
 	}
 	
 	ret = gpio_direction_output(MSM_7x27A_TOUCH_RESET_PIN, 1);
+	if (ret)
+	{
+		pr_err("%s:touch reset gpio %d output failed\n", __func__, MSM_7x27A_TOUCH_RESET_PIN);
+		gpio_free(MSM_7x27A_TOUCH_RESET_PIN);
+		return ret;
+	}
 	mdelay(5);
 	ret = gpio_direction_output(MSM_7x27A_TOUCH_RESET_PIN, 0);
+	if (ret)
+	{
+		pr_err("%s:touch reset gpio %d output failed\n", __func__, MSM_7x27A_TOUCH_RESET_PIN);
+		gpio_free(MSM_7x27A_TOUCH_RESET_PIN);
+		return ret;
+	}
 	mdelay(10);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
 	ret = gpio_direction_output(MSM_7x27A_TOUCH_RESET_PIN, 1);
-	mdelay(50);//must more than 10ms.
+	if (ret)
+	{
+		pr_err("%s:touch reset gpio %d output failed\n", __func__, MSM_7x27A_TOUCH_RESET_PIN);
+		gpio_free(MSM_7x27A_TOUCH_RESET_PIN);
+		return ret;
+	}
+	msleep(50);//must more than 10ms.
 
 	gpio_free(MSM_7x27A_TOUCH_RESET_PIN);
 	return ret;
@@ -521,7 +546,9 @@ static int get_touch_resolution(struct tp_resolution_conversion *tp_resolution_t
 		|| machine_is_msm8x25_U8833D()
 		|| machine_is_msm8x25_U8833()        
 		|| machine_is_msm8x25_H881C()
-		|| machine_is_msm8x25_C8812P())
+		|| machine_is_msm8x25_C8812P()
+		|| machine_is_msm8x25_Y301_A1()
+		|| machine_is_msm8x25_Y300_J1())
 	{
 		tp_resolution_type->lcd_x = LCD_X_WVGA;
 		tp_resolution_type->lcd_y = LCD_Y_WVGA;   
@@ -561,6 +588,50 @@ static int get_touch_resolution(struct tp_resolution_conversion *tp_resolution_t
 	return 1;
 }
 
+/*If product has independent button ,return 1*/
+static buttonflag read_button_flag(void)
+{
+	if(machine_is_msm8x25_Y301_A1())
+	{
+		return TOUCH_INDEPENDENT_BUTTON;
+	}
+	else if(machine_is_msm8x25_Y300_J1())
+	{
+		return TOUCH_NO_BUTTON;
+	}
+	else 
+	{
+		return TOUCH_VIRTUAL_KEY;
+	}
+}
+
+/*If product has independent button ,init the button map*/
+static int get_touch_button_map(struct tp_button_map *tp_button_map)
+{	
+	int button_num = 0;
+	int button_map[MAX_BUTTON_NUM] = {0};
+	int i = 0;
+	
+	if(machine_is_msm8x25_Y301_A1())
+	{
+		button_map[0] = KEY_BACK;
+		button_map[1] = KEY_HOME;
+		button_map[2] = KEY_MENU;
+		button_num = 3;
+	}
+	else 
+	{
+		return 0 ;
+	}
+	
+	tp_button_map->button_num = button_num;
+	for(i=0;i<button_num;i++)
+	{
+		tp_button_map->button_map[i] = button_map[i];
+	}
+	return 1;
+}
+
 static struct touch_hw_platform_data touch_hw_data = 
 {
 	.touch_power = power_switch,
@@ -570,6 +641,8 @@ static struct touch_hw_platform_data touch_hw_data =
 	.touch_reset = touch_reset,
 	.get_touch_reset_gpio = get_touch_reset_gpio,
 	.get_touch_resolution = get_touch_resolution,
+	.read_button_flag = read_button_flag,
+	.get_touch_button_map = get_touch_button_map,
 };
 
 /* -------------------- huawei sensors -------------------- */
@@ -851,6 +924,12 @@ static struct i2c_board_info huawei_i2c_board_info[] __initdata =
 	},
 #endif
 
+/*Add new i2c information for flash lm3642*/
+#ifdef CONFIG_HUAWEI_FEATURE_LM3642
+	{
+		I2C_BOARD_INFO("lm3642" , 0x63),
+	},
+#endif
 /* -------------------- huawei nfc -------------------- */
 #ifdef CONFIG_HUAWEI_NFC_PN544
 	{
@@ -1315,7 +1394,10 @@ void __init msm7627a_add_io_devices(void)
 	/* keypad */
 	platform_device_register(&kp_pdev);
 #else
-	platform_device_register(&keypad_device_default);
+	if(machine_is_msm8x25_Y300_J1())
+		platform_device_register(&keypad_device_y300j1);
+	else
+		platform_device_register(&keypad_device_default);
 #endif
 	/* headset */
 	platform_device_register(&hs_pdev);
